@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nadine's Ninja Bomb</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        :root { --case: #6c5ce7; --case-dark: #4834d4; --accent: #fab1a0; --danger: #ff4757; }
+        * { box-sizing: border-box; touch-action: none; user-select: none; }
+        
+        body { 
+            margin: 0; background: #1a1a1a; font-family: 'Press Start 2P', cursive;
+            display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden;
+        }
+
+        #gameboy {
+            width: 380px; height: 780px; background: var(--case);
+            border-radius: 30px; padding: 25px; border: 6px solid var(--case-dark);
+            box-shadow: 15px 15px 0px #000; position: relative;
+            display: flex; flex-direction: column;
+        }
+
+        #screen {
+            flex: 1; background: #2d3436; border-radius: 15px; overflow: hidden;
+            position: relative; border: 4px solid #000;
+        }
+        
+        /* Animasi Getar kalau kena BOM */
+        .shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-2px, 0, 0); }
+            20%, 80% { transform: translate3d(4px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+            40%, 60% { transform: translate3d(8px, 0, 0); }
+        }
+
+        canvas { width: 100%; height: 100%; display: block; }
+
+        .overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; color: white; z-index: 10; padding: 25px;
+        }
+
+        .photo-frame {
+            width: 130px; height: 130px; border: 5px solid var(--accent);
+            border-radius: 15px; overflow: hidden; margin-bottom: 20px;
+            box-shadow: 0 0 20px var(--accent);
+        }
+        .photo-frame img { width: 100%; height: 100%; object-fit: cover; }
+
+        #score-ui {
+            position: absolute; top: 15px; left: 15px; color: var(--accent);
+            font-size: 10px; z-index: 5; text-shadow: 2px 2px #000;
+        }
+
+        #final-msg {
+            font-size: 9px; line-height: 1.8; text-align: left; width: 100%;
+            height: 65%; overflow-y: auto; color: #55efc4;
+            background: #1e272e; padding: 15px; border: 2px solid #55efc4; border-radius: 10px;
+        }
+
+        button {
+            padding: 15px 25px; font-family: inherit; font-size: 10px;
+            background: var(--accent); border: none; border-bottom: 4px solid #e17055;
+            cursor: pointer; margin-top: 20px; border-radius: 5px; color: #2d3436;
+        }
+        
+        .btn-retry { background: var(--danger); color: white; border-bottom: 4px solid #b71540; }
+    </style>
+</head>
+<body>
+
+<div id="gameboy">
+    <div style="text-align:center; color:rgba(255,255,255,0.4); font-size:10px; margin-bottom:15px;">NINTENDINE ✨</div>
+    <div id="screen">
+        <div id="score-ui">SCORE: 0 / 10</div>
+        
+        <div id="start-screen" class="overlay">
+            <div class="photo-frame">
+                <img src="https://img.sanishtech.com/u/72b9892de9bd21385d77960c0be50ce8.png" alt="Nadine">
+            </div>
+            <h2 style="font-size: 12px; color: var(--accent); line-height: 1.5;">NINJA FRUITS<br><span style="color:#ff4757; font-size:9px;">NADINE EDITION!</span></h2>
+            <button onclick="startGame()">START</button>
+        </div>
+
+        <div id="game-over-screen" class="overlay" style="display:none;">
+            <h2 style="color:var(--danger); font-size: 18px; margin-bottom: 10px;">BOOM! 💣</h2>
+            <p style="font-size: 8px; color: #ccc;">nooo kena bom ya sayangg<br>gapapaa coba lagi yuu</p>
+            <button class="btn-retry" onclick="startGame()">COBA LAGI</button>
+        </div>
+
+        <div id="end-screen" class="overlay" style="display:none;">
+            <h3 style="color:var(--accent); font-size:10px; margin-bottom:10px;">HAALOWW CANTIKKK</h3>
+            <div id="final-msg"></div>
+            <button onclick="location.reload()">REPLAY</button>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    
+    <div style="height:120px; position:relative; margin-top:20px;">
+        <div style="position:absolute; left:0; width:80px; height:80px; background:#333; border-radius:10px; box-shadow: inset 2px 2px 5px rgba(0,0,0,0.5);"></div>
+        <div style="position:absolute; right:0; display:flex; gap:15px; transform:rotate(-15deg);">
+            <div style="width:45px; height:45px; background:#ff4757; border-radius:50%; box-shadow:3px 3px 0 #900;"></div>
+            <div style="width:45px; height:45px; background:#ff4757; border-radius:50%; box-shadow:3px 3px 0 #900;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreUI = document.getElementById('score-ui');
+    const screenEl = document.getElementById('screen');
+
+    let score = 0;
+    let objects = []; // Buah & Bom
+    let particles = [];
+    let gameActive = false;
+    let audioCtx;
+    let bgmInterval;
+
+    const emojis = ['🍎', '🍊', '🍉', '🍓', '🍍', '🍒', '🍑'];
+
+    function resize() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- AUDIO SYSTEM ---
+    function playTone(freq, type, dur, vol = 0.1) {
+        if(!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(vol, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
+    }
+
+    function playExplosion() {
+        if(!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.5);
+        g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+    }
+
+    function playBGM() {
+        const melody = [261, 329, 392, 523, 392, 329];
+        let i = 0;
+        if(bgmInterval) clearInterval(bgmInterval);
+        bgmInterval = setInterval(() => {
+            if(!gameActive) return;
+            playTone(melody[i], 'triangle', 0.3, 0.02);
+            i = (i + 1) % melody.length;
+        }, 400);
+    }
+
+    // --- GAME LOGIC ---
+    class GameItem {
+        constructor() {
+            this.x = Math.random() * (canvas.width - 60) + 30;
+            this.y = canvas.height + 50;
+            
+            // 20% kemungkinan muncul BOM
+            this.isBomb = Math.random() < 0.2; 
+            
+            this.emoji = this.isBomb ? '💣' : emojis[Math.floor(Math.random() * emojis.length)];
+            this.speedY = -(Math.random() * 5 + 9); // Kecepatan lempar
+            this.speedX = (Math.random() - 0.5) * 5;
+            this.sliced = false;
+            this.angle = 0;
+            this.rotation = (Math.random() - 0.5) * 0.2;
+        }
+        update() {
+            this.y += this.speedY;
+            this.x += this.speedX;
+            this.speedY += 0.15; // Gravitasi
+            this.angle += this.rotation;
+        }
+        draw() {
+            if(this.sliced) return;
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+            ctx.font = "40px Arial";
+            ctx.textAlign = "center";
+            // Efek bayangan biar jelas
+            ctx.shadowColor = "rgba(0,0,0,0.5)";
+            ctx.shadowBlur = 5;
+            ctx.fillText(this.emoji, 0, 0);
+            ctx.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x; this.y = y;
+            this.size = Math.random() * 6 + 3;
+            this.speedX = (Math.random() - 0.5) * 10;
+            this.speedY = (Math.random() - 0.5) * 10;
+            this.life = 1.0;
+            this.color = color;
+        }
+        update() {
+            this.x += this.speedX; this.y += this.speedY;
+            this.life -= 0.03;
+        }
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.globalAlpha = this.life;
+            ctx.fillRect(this.x, this.y, this.size, this.size);
+            ctx.globalAlpha = 1.0;
+        }
+    }
+
+    function startGame() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('game-over-screen').style.display = 'none';
+        screenEl.classList.remove('shake');
+        
+        gameActive = true;
+        score = 0;
+        objects = [];
+        particles = [];
+        playBGM();
+        animate();
+    }
+
+    function gameOver() {
+        gameActive = false;
+        playExplosion();
+        screenEl.classList.add('shake'); // Efek getar
+        setTimeout(() => {
+            document.getElementById('game-over-screen').style.display = 'flex';
+        }, 500);
+    }
+
+    function animate() {
+        if(!gameActive) return;
+        ctx.fillStyle = '#2d3436';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Spawn items (semakin sering sedikit)
+        if(Math.random() < 0.009) objects.push(new GameItem());
+
+        objects.forEach((obj, index) => {
+            obj.update();
+            obj.draw();
+            // Hapus kalau jatuh ke bawah
+            if(obj.y > canvas.height + 100) objects.splice(index, 1);
+        });
+
+        particles.forEach((p, index) => {
+            p.update();
+            p.draw();
+            if(p.life <= 0) particles.splice(index, 1);
+        });
+
+        scoreUI.innerText = `SCORE: ${score} / 20`;
+        requestAnimationFrame(animate);
+    }
+
+    // --- INTERACTION ---
+    const handleSlice = (ex, ey) => {
+        if(!gameActive) return;
+        const rect = canvas.getBoundingClientRect();
+        const tx = ex - rect.left;
+        const ty = ey - rect.top;
+
+        objects.forEach(obj => {
+            let dist = Math.hypot(tx - obj.x, ty - obj.y);
+            if(!obj.sliced && dist < 40) {
+                if(obj.isBomb) {
+                    gameOver(); // KENA BOM
+                } else {
+                    // KENA BUAH
+                    obj.sliced = true;
+                    score++;
+                    playTone(600 + (Math.random()*200), 'square', 0.1, 0.05);
+                    
+                    // Efek partikel
+                    for(let i=0; i<10; i++) particles.push(new Particle(obj.x, obj.y, '#fab1a0'));
+                    
+                    if(score >= 20) winGame();
+                }
+            }
+        });
+    }
+
+    canvas.addEventListener('touchstart', (e) => handleSlice(e.touches[0].clientX, e.touches[0].clientY));
+    canvas.addEventListener('touchmove', (e) => handleSlice(e.touches[0].clientX, e.touches[0].clientY));
+
+    function winGame() {
+        gameActive = false;
+        clearInterval(bgmInterval);
+        document.getElementById('end-screen').style.display = 'flex';
+        
+        const message = `HAIII SAYANGGKU CINTAKUU! 🍎💣✨\n\nwihh game jam 3 pagi lagii nihhh wkwkw1kek, nah di game jam 3 pagi kali ini tuuhh bertemakan buah buahann, dan terinspirasi darii game ninja fruit lhoo, jadii semoga kamu suka game inii yaaa.. dan bisa menambah mutmu di pagii hariii\n\nwahh hari ini lumayan seruu yaaa.. kitaa bisa banyak waktu lagi dehh hari inii, dari yang berangkat pagii kitaa bisa bersamaa lagii, lalu di sekolahan yaa walaupun ga banyakk tapi kitaa bisa bertemu di beberapa waktuu kemarinn, untuk mengerjakan tugas, terus membantu kamuu dalam mengaji, mtk dan lain sebagainyaa dehh.. teruss abis ituu pulangnyaa kita bisaaa bertemuu lagiii hehehehee, timakasii banyak banyakk yaa uda mau nemenin aku ambil pakett, yaa walaupun ternyata paketnya di bawa kurir sii hehehe, tapi terimakasih jugaa yakk udaa mampirr rumahkuu lagiii, alhamdulillah sekarang uda mulai enjoyy yaaa main disinii.. suda tida se gugup kemarin lagiii.. dann kitaa berhasil mengerjakan mtknyaa jugaakk woii kerennn.. sekali lagi timakasii banyakk yaa udaa mauu nemeninn akk dan mempercayai akk..\n\ndaann aku mau berterimakasih jugaa untuk hal lain yaituu, ternyataa selama inii di sisi kehidupanmu tuhh banyak pressure dari luar karena kamu deket sama aku yaaa.. aku minta maaf banget yaa kalau kehadiranku di hidupmu malah banyak yang tidaa sukaaa.. tapi aku mau berterimakasih jugaa buat kamu yang udaa bertahan, dan sayang sama akuu selama inii.. semogaa kitaa bisa terus bersamaa sampai kitaa bisaa memperlihatkan dengan tenang tentang kedekatann kitaaa yaaaa sayanggg..️\n\n-okeeyydeee mungkin segini duluu yaa game jam 3 paginyaaa, semogaa kamu sukaa ya sayanggg.. selamat beristirahatt cantikkk, semogaa besok menjadi hari yang lancarr yaa buat kamuu.. semua uprak yang di jalankan lancar semuaaa, aamiin.. besok kalau kamu butuh bantuan bilang aja ya sayangg, hapalan, terus infor dan lain sebagainya nanti bilang ajaa yaaa.. okaayydee goodnightt sayanggg, semogaa bisaa bobo nyenyakk yaaaa, jangan ngiler lagii heheheeee.. see u besokk yaa sayanggg.. je t'aimeee bieenn cantikkkk.. sayang nadine banyak banyakkk 🤍🩵🩵💜💙🩷❤️🤍💜🤍💜💙`;
+        
+        let i = 0;
+        const el = document.getElementById('final-msg');
+        el.innerHTML = "";
+        function type() {
+            if(i < message.length) {
+                playTone(200, 'sine', 0.05, 0.02);
+                el.innerHTML += message[i] === '\n' ? '<br>' : message[i];
+                i++;
+                setTimeout(type, 50);
+            }
+        }
+        type();
+    }
+</script>
+</body>
+</html>
